@@ -33,6 +33,15 @@ export type RenderOptions = {
 
 const dotStar = star(literal(CharSet.wildcard({ dotAll: false })))
 
+// ExtRegex version of dotStar for use in toExtRegexAux (lazy to avoid circular dependency)
+let _dotStarExtRegex: RE.ExtRegex | undefined
+function getDotStarExtRegex(): RE.ExtRegex {
+  if (_dotStarExtRegex === undefined) {
+    _dotStarExtRegex = RE.star(RE.literal(CharSet.wildcard({ dotAll: false })))
+  }
+  return _dotStarExtRegex
+}
+
 //////////////////////////////////////////////
 ///// Mapping: AST -> ExtRegex           /////
 //////////////////////////////////////////////
@@ -427,25 +436,58 @@ export function toExtRegex(ast: RegExpAST): RE.ExtRegex {
     ast = concat(ast, dotStar)
   }
   
-  return toExtRegexAux(ast)
+  return toExtRegexAux(ast, false) // false = no trailing content after this expression
 }
-function toExtRegexAux(ast: RegExpAST): RE.ExtRegex {
+
+/**
+ * Convert AST to ExtRegex.
+ * @param ast The AST node to convert
+ * @param hasTrailingContent Whether there is more content after this expression in the regex.
+ *                           This affects how lookahead's `right` is interpreted.
+ */
+function toExtRegexAux(ast: RegExpAST, hasTrailingContent: boolean): RE.ExtRegex {
   assert(!isOneOf(ast.type, sugarNodeTypes), `Got ${ast.type} node. Expected desugared AST.`)
   assert(ast.type !== 'start-anchor',  `Unexpected start anchor. Should already be eliminated.`)
   assert(ast.type !== 'end-anchor',  `Unexpected end anchor. Should already be eliminated.`)
   switch (ast.type) {
     case 'epsilon': return RE.epsilon
     case 'literal': return RE.literal(ast.charset)
-    case 'concat': return RE.concat(toExtRegexAux(ast.left), toExtRegexAux(ast.right))
-    case 'union': return RE.union(toExtRegexAux(ast.left), toExtRegexAux(ast.right))
-    case 'star': return RE.star(toExtRegexAux(ast.inner))
+    case 'concat': {
+      // When processing left side, there IS trailing content (the right side)
+      // When processing right side, pass through the hasTrailingContent flag
+      const left = toExtRegexAux(ast.left, true)
+      const right = toExtRegexAux(ast.right, hasTrailingContent)
+      return RE.concat(left, right)
+    }
+    case 'union': {
+      // Both branches have the same trailing content context
+      return RE.union(
+        toExtRegexAux(ast.left, hasTrailingContent),
+        toExtRegexAux(ast.right, hasTrailingContent)
+      )
+    }
+    case 'star': return RE.star(toExtRegexAux(ast.inner, true)) // Inside star, there's always "more" (the star itself)
     case 'lookahead': {
-      const inner = toExtRegexAux(ast.inner)
-      const right = toExtRegexAux(ast.right)
+      const inner = toExtRegexAux(ast.inner, true) // Lookahead inner always has potential trailing
+      const right = toExtRegexAux(ast.right, hasTrailingContent)
+      // Lookahead (?=inner)right asserts that at the current position:
+      // 1. `inner` can match as a prefix (zero-width assertion)
+      // 2. `right` can match (and consumes)
+      // The `inner` is a prefix match, so we use concat(inner, .*).
+      // For `right`:
+      // - If `right` is epsilon, the lookahead has no explicit continuation, use .*
+      // - If there's trailing content after the lookahead, `right` should be treated as a prefix (right.*)
+      // - If there's NO trailing content (e.g., anchored with $), `right` is the full remaining
+      const innerAsPrefix = RE.concat(inner, getDotStarExtRegex())
+      const effectiveRight = RE.equal(right, RE.epsilon) 
+        ? getDotStarExtRegex() 
+        : hasTrailingContent 
+          ? RE.concat(right, getDotStarExtRegex())
+          : right
       if (ast.isPositive)
-        return RE.intersection(inner, right)
+        return RE.intersection(innerAsPrefix, effectiveRight)
       else
-        return RE.intersection(RE.complement(inner), right)
+        return RE.intersection(RE.complement(innerAsPrefix), effectiveRight)
     }
   }
   checkedAllCases(ast.type)

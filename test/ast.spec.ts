@@ -2,6 +2,7 @@ import { describe, it } from "node:test"
 import { strict as assert } from "node:assert"
 import * as RE from "../src/regex"
 import * as AST from "../src/ast"
+import * as DFA from "../src/dfa"
 import { parseRegExp } from "../src/regex-parser"
 
 describe('toExtRegex', () => {
@@ -100,14 +101,19 @@ describe('toExtRegex', () => {
     for (const [regexp, expected] of testCases) {
       it(`${regexp}`, () => {
         const actual = AST.toExtRegex(parseRegExp(regexp))
-        assert.equal(actual.hash, expected.hash, RE.debugShow(actual) + '\n\n' + RE.debugShow(expected))
+        // Use semantic equivalence instead of structural equality
+        // because the lookahead conversion may produce structurally different but equivalent regexes
+        assert.ok(
+          DFA.isEquivalent(actual, expected),
+          `Expected equivalent to ${RE.debugShow(expected)}, got ${RE.debugShow(actual)}`
+        )
       })
     }
 
     it('fixme', { todo: true }, () => {
       const actual = AST.toExtRegex(parseRegExp(/^(a(?!b))*$/))
       const expected = RE.star(RE.string('a'))
-      assert.equal(actual.hash, expected.hash)
+      assert.ok(DFA.isEquivalent(actual, expected))
     })
 
   })
