@@ -132,6 +132,42 @@ describe('parseRegExp', () => {
     parseRegExp(/^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$/)
   })
 
+  // Tests for issue #13: Lookaheads produce incorrect results
+  describe('lookahead toRegExp behavior (issue #13)', () => {
+    it('/(?=a)/ produces a regex that matches strings containing a', () => {
+      const resultRegex = RB(/(?=a)/).toRegExp()
+      // Should match strings containing 'a'
+      assert.ok(resultRegex.test('a'), 'should match "a"')
+      assert.ok(resultRegex.test('abc'), 'should match "abc"')
+      assert.ok(resultRegex.test('bac'), 'should match "bac"')
+      assert.ok(!resultRegex.test('b'), 'should not match "b"')
+      assert.ok(!resultRegex.test(''), 'should not match ""')
+    })
+
+    it('/a{2}/ produces correct output', () => {
+      const resultRegex = RB(/a{2}/).toRegExp()
+      // Should match strings containing 'aa'
+      assert.ok(resultRegex.test('aa'), 'should match "aa"')
+      assert.ok(resultRegex.test('xaay'), 'should match "xaay"')
+      assert.ok(!resultRegex.test('a'), 'should not match "a"')
+    })
+
+    it('/(?=ab)a/ matches strings containing ab', () => {
+      const resultRegex = RB(/(?=ab)a/).toRegExp()
+      // At some position, 'ab' matches as prefix, then 'a' is consumed
+      assert.ok(resultRegex.test('ab'), 'should match "ab"')
+      assert.ok(resultRegex.test('abc'), 'should match "abc"')
+      assert.ok(resultRegex.test('xab'), 'should match "xab"')
+      assert.ok(!resultRegex.test('a'), 'should not match "a"')
+    })
+
+    it('/(?!a)b/ matches strings containing b not preceded by nothing-at-position-being-a', () => {
+      const resultRegex = RB(/(?!a)b/).toRegExp()
+      assert.ok(resultRegex.test('b'), 'should match "b"')
+      assert.ok(resultRegex.test('cb'), 'should match "cb"')
+    })
+  })
+
 })
 
 function parse_skipKnownIssues(re: RegExp) {

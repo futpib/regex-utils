@@ -33,7 +33,10 @@ export type RenderOptions = {
 
 const dotStar = star(literal(CharSet.wildcard({ dotAll: false })))
 
-// ExtRegex version of dotStar for use in toExtRegexAux (lazy to avoid circular dependency)
+// ExtRegex version of dotStar for use in toExtRegexAux.
+// Uses lazy initialization to avoid circular dependency issues at module load time.
+// This is safe in JavaScript's single-threaded execution model - the value is computed
+// once on first access and then cached for subsequent calls.
 let _dotStarExtRegex: RE.ExtRegex | undefined
 function getDotStarExtRegex(): RE.ExtRegex {
   if (_dotStarExtRegex === undefined) {
